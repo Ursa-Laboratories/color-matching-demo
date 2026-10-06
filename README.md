@@ -1,5 +1,7 @@
 # Ursa Learning
 
+[Project repository](https://github.com/Ursa-Laboratories/color-matching-demo)
+
 Active learning for lab experiments, with dedicated color matching and overnight workflows. Ursa Learning chooses experiment parameters and scores results. A separate CubOS API server validates and executes the protocols, controls hardware, and owns inventory.
 
 The three workspaces are **Active Learning**, **Color Matching**, and **Overnight Runs**. The interface keeps CubOS's familiar operator layout with its own identity. Open the linked CubOS operator interface for calibration and station administration.
