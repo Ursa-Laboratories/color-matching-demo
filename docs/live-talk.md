@@ -65,6 +65,23 @@ means the queue table or function was not found. Check that the key belongs to
 the configured project and that `supabase/live-demo.sql` ran successfully there.
 After changing Vercel environment variables, redeploy to apply them.
 
+For `QUEUE_ACCESS_DENIED` with a backend secret key, run this repair in the
+project's SQL Editor. It restores only the backend's queue permissions and
+preserves existing jobs and browser restrictions:
+
+```sql
+grant usage on schema public to service_role;
+grant select, insert, update on public.ursa_live_events to service_role;
+grant execute on function public.ursa_live_compare_and_set(text, bigint, jsonb)
+  to service_role;
+notify pgrst, 'reload schema';
+```
+
+If access is still denied, confirm `SUPABASE_SECRET_KEY` is a secret API key
+starting with `sb_secret_` (or a legacy `service_role` JWT), not a publishable
+key, anon JWT, key name, or database password. The repair cannot authorize a
+public key; keep the actual secret in Vercel's server-only environment settings.
+
 ## Laptop setup and rehearsal
 
 Requires Python 3.11+, Linux/macOS (or a suitable Linux VM), and internet access.

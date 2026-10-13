@@ -11,6 +11,9 @@ create table if not exists public.ursa_live_events (
 
 alter table public.ursa_live_events enable row level security;
 revoke all on public.ursa_live_events from public, anon, authenticated;
+-- Table grants alone do not allow access when the project's default schema
+-- permissions are restricted. Only the server's role needs schema access.
+grant usage on schema public to service_role;
 grant select, insert, update on public.ursa_live_events to service_role;
 
 -- One atomic update per queue action. Concurrent Vercel requests retry from the
