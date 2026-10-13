@@ -179,9 +179,22 @@ tips, transfer dye, and mix through existing CubOS protocols. Validate physicall
   wait for the next Run. Pause lets the current well finish and holds later jobs.
 - **Pause and laptop disconnection are not emergency stops.** Stop an active
   protocol in CubOS. Hardware controls remain local.
-- A signed browser session allows one recipe per event and deduplicates retries.
-  Clearing cookies can create another participant. A 300-job cap and generous
-  shared-venue-IP burst limit provide basic abuse protection, not strong identity.
+- A signed browser session identifies the participant. Each phone submission has
+  its own submission ID, so a participant can add another recipe while retries
+  of the same submission return the saved job. Older clients without a
+  submission ID still deduplicate against their prior legacy submission.
+  Clearing cookies can create another participant. A 300-visible-job cap and
+  generous shared-venue-IP burst limit provide basic abuse protection, not
+  strong identity.
+- The host can reset the displayed queue after confirming the displayed queue
+  revision. A stale reset request is rejected, so retrying a request after a
+  lost response cannot clear newer jobs. Reset archives the displayed jobs,
+  cancels waiting jobs, and increments the queue revision. A
+  running or blocked job prevents reset; use the physical-review retirement
+  flow first. Reset does not stop hardware, clear run/well identities, change
+  the local journal or well allocations, or erase rate-limit and worker history.
+  Archived jobs remain private backend history and late reports from their
+  authenticated owner are acknowledged without restoring them to the queue.
 - The cloud queue is durable and uses Postgres compare-and-set across Vercel
   instances. Stale worker heartbeats do not expire active claims.
 - The local journal reserves a fresh well and records the exact protocol bundle

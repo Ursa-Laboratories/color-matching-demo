@@ -106,6 +106,9 @@
 .live-ticket-status .running, .live-bench-status .running { background: #bf802c; animation: live-pulse 1.5s ease-in-out infinite; }
 .live-ticket-status .completed { background: #378068; }
 .live-ticket > p { font-size: 12px; color: var(--live-muted); line-height: 1.7; }
+.live-ticket .live-another { margin-top: 27px; }
+.live-demo .live-secondary { display: block; width: 100%; margin-top: 10px; min-height: 44px; padding: 11px 14px; border: 1px solid #dddde4; border-radius: 6px; color: #292b34; background: #fff; font-size: 12px; }
+.live-demo .live-secondary:focus-visible, .live-controls button:focus-visible, .live-ticket button:focus-visible { outline: 2px solid #50536b; outline-offset: 3px; }
 .live-receipt { margin: 30px 0 0; padding-top: 20px; border-top: 1px solid var(--live-line); display: grid; gap: 14px; font-size: 12px; }
 .live-receipt > div { display: flex; justify-content: space-between; }
 .live-receipt dt { display: flex; align-items: center; gap: 8px; text-transform: capitalize; }
@@ -124,6 +127,10 @@
 .live-controls .live-primary { width: auto; }
 .live-controls a { font-size: 12px; padding: 10px; }
 .live-controls p { font-size: 11px; color: var(--live-muted); line-height: 1.6; margin-bottom: 0; }
+.live-reset-confirm { border-top: 1px solid var(--live-line); margin-top: 16px; padding-top: 14px; }
+.live-reset-confirm h2 { margin: 0; font-size: 14px; font-weight: 500; }
+.live-reset-confirm p { margin: 8px 0 12px; }
+.live-reset-confirm > div { display: flex; gap: 9px; flex-wrap: wrap; }
 .live-recovery { border-top: 1px solid var(--live-line); margin-top: 16px; padding-top: 8px; }
 .live-recovery label { display: block; margin: 12px 0; font-size: 12px; }
 .live-recovery input { accent-color: #50536b; margin-right: 6px; }

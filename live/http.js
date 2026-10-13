@@ -56,7 +56,7 @@ export function createHandler({ env = process.env, storeFactory = () => new Supa
         result = publicState(await store.read(), participantId, now(), role === 'admin');
       } else {
         const action = path === 'jobs' ? 'submit' : path.split('/')[1];
-        const allowed = path === 'jobs' || (role === 'admin' && ['run', 'pause', 'accepting', 'cancel', 'resolve'].includes(action))
+        const allowed = path === 'jobs' || (role === 'admin' && ['run', 'pause', 'accepting', 'cancel', 'resolve', 'reset'].includes(action))
           || (role === 'worker' && ['heartbeat', 'claim', 'progress'].includes(action));
         if (!isPost || !allowed) throw new QueueError('Not found.', 404);
         // Only the platform-supplied Vercel header is trusted for client-IP rate limiting.

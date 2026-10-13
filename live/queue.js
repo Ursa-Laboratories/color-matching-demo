@@ -6,7 +6,7 @@ export class QueueError extends Error {
 }
 export function initialState(eventId, mode) {
   return { version: 2, eventId, mode, accepting: true, draining: false, activeId: null,
-    jobs: [], worker: null, rates: {} };
+    jobs: [], worker: null, rates: {}, queueRevision: 0 };
 }
 const identifier = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{16,80}$/.test(value);
 const required = (condition, message) => { if (!condition) throw new QueueError(message); };
@@ -15,10 +15,13 @@ const required = (condition, message) => { if (!condition) throw new QueueError(
 export function transition(state, action, body, context) {
   const { now, participantId, ipHash } = context;
   if (action === 'submit') {
-    const existing = state.jobs.find(job => job.participantId === participantId);
+    if (body.submissionId !== undefined && !identifier(body.submissionId))
+      throw new QueueError('Invalid submission identity.', 400);
+    const existing = state.jobs.find(job => job.participantId === participantId
+      && (body.submissionId !== undefined ? job.submissionId === body.submissionId : !job.submissionId));
     if (existing) return existing;
     required(state.accepting, 'Submissions are closed for this session.');
-    required(state.jobs.length < 300, 'The session queue is full.');
+    required(state.jobs.filter(job => job.archivedAt == null).length < 300, 'The session queue is full.');
     const name = typeof body.name === 'string' ? body.name.normalize('NFC').trim().replace(/\s+/gu, ' ') : '';
     if (!name || name.length > 40 || /\p{Cc}|\p{Cf}/u.test(name))
       throw new QueueError('Enter a name or nickname of 1–40 characters.', 400);
@@ -28,7 +31,8 @@ export function transition(state, action, body, context) {
     const rate = state.rates[ipHash] ?? { count: 0, until: now + 60_000 };
     if (rate.count >= 120) throw new QueueError('A lot of recipes arrived at once. Try again in a minute.', 429);
     rate.count++; state.rates[ipHash] = rate;
-    const job = { id: randomUUID(), number: state.jobs.length + 1, participantId, name, recipe,
+    const job = { id: randomUUID(), number: state.jobs.reduce((max, item) => Math.max(max, item.number ?? 0), 0) + 1,
+      participantId, ...(body.submissionId === undefined ? {} : { submissionId: body.submissionId }), name, recipe,
       status: 'queued', createdAt: now, well: null, runId: null };
     state.jobs.push(job); return job;
   }
@@ -56,6 +60,17 @@ export function transition(state, action, body, context) {
       'Confirm the CubOS run is stopped and the physical station has been checked.');
     job.status = 'cancelled'; job.retiredAt = now; state.activeId = null; state.draining = false;
     state.jobs.filter(j => j.status === 'ready').forEach(j => { j.status = 'queued'; });
+  } else if (action === 'reset') {
+    required(body.confirmed === true, 'Confirm that the displayed queue should be reset.');
+    required(Number.isInteger(body.queueRevision) && body.queueRevision === (state.queueRevision ?? 0),
+      'The queue changed since it was displayed. Refresh before resetting.');
+    required(!state.activeId, 'Retire the active job through physical review before resetting the queue.');
+    state.queueRevision = (state.queueRevision ?? 0) + 1;
+    state.draining = false;
+    state.jobs.filter(job => job.archivedAt == null).forEach(job => {
+      if (job.status === 'queued' || job.status === 'ready') job.status = 'cancelled';
+      job.archivedAt = now;
+    });
   } else if (action === 'heartbeat' || action === 'claim') {
     required(identifier(body.workerId), 'Invalid worker identity.');
     required(body.mode === state.mode, 'Worker mode does not match this event.');
@@ -77,6 +92,9 @@ export function transition(state, action, body, context) {
     const job = state.jobs.find(j => j.id === body.jobId);
     required(job && job.workerId === body.workerId, 'Job does not belong to this worker.');
     required(['running', 'completed', 'blocked'].includes(body.status), 'Invalid job status.');
+    // Reset archives the display but retains worker-owned run identities. A late
+    // report is acknowledged after ownership is checked and cannot revive history.
+    if (job.archivedAt != null) return job;
     // Acknowledge an interrupted worker's saved report after manual retirement.
     // The operator's decision remains final; delayed reports never revive a job.
     if (job.status === 'cancelled' && job.retiredAt != null) return job;
@@ -108,15 +126,17 @@ export function transition(state, action, body, context) {
 }
 export function publicJob(job) {
   if (!job) return null;
-  const { participantId, workerId, message, ...safe } = job;
+  const { participantId, workerId, message, submissionId, archivedAt, ...safe } = job;
   return safe;
 }
 export function publicState(state, participantId, now, operator = false) {
+  const visibleJobs = state.jobs.filter(job => job.archivedAt == null);
   return { eventId: state.eventId, mode: state.mode, accepting: state.accepting,
     draining: state.draining, activeId: state.activeId,
+    queueRevision: state.queueRevision ?? 0,
     totalVolumeUl: TOTAL_VOLUME_UL, volumeStepUl: VOLUME_STEP_UL, maxParts: MAX_PARTS,
     workerOnline: !!state.worker && now - state.worker.lastSeen < 30_000,
     workerLastSeen: state.worker?.lastSeen ?? null,
-    ownJob: publicJob(state.jobs.find(j => j.participantId === participantId)),
-    jobs: state.jobs.map(job => ({ ...publicJob(job), ...(operator ? { message: job.message } : {}) })) };
+    ownJob: publicJob(visibleJobs.filter(j => j.participantId === participantId).at(-1)),
+    jobs: visibleJobs.map(job => ({ ...publicJob(job), ...(operator ? { message: job.message } : {}) })) };
 }

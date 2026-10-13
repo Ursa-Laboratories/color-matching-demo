@@ -42,6 +42,18 @@ test('retries return the same saved recipe even after submissions close', () => 
   assert.equal(act('submit', { red: 1, yellow: 1, blue: 1 }).id, job.id);
   assert.equal(state.jobs.length, 1); assert.throws(() => act('submit', recipe, 'p2'));
 });
+test('submission IDs allow multiple jobs per cookie and deduplicate only matching retries', () => {
+  const { act, state } = fixture();
+  const firstId = 'event_submission_0001';
+  const secondId = 'event_submission_0002';
+  const first = act('submit', { ...recipe, submissionId: firstId });
+  assert.equal(act('submit', { ...recipe, name: 'Changed', submissionId: firstId }).id, first.id);
+  const second = act('submit', { ...recipe, submissionId: secondId });
+  assert.notEqual(second.id, first.id);
+  assert.equal(state.jobs.length, 2);
+  assert.equal(publicState(state, 'p1', 100_000).ownJob.id, second.id);
+  assert.throws(() => act('submit', { ...recipe, submissionId: 'bad id' }), error => error.status === 400);
+});
 test('names are required, bounded, normalized and preserved through public receipts and worker claims', () => {
   const { act, state } = fixture();
   for (const name of [undefined, null, 12, {}, '', '   ', 'a'.repeat(41), 'bad\u0000name', 'bad\u202ename'])
@@ -113,6 +125,70 @@ test('a delayed worker report after retirement is acknowledged without reviving 
   assert.throws(() => act('progress', { ...completion(job), workerId: 'b'.repeat(32) }));
   act('heartbeat', worker); act('run');
   assert.equal(act('claim', worker).id, next.id);
+});
+test('reset requires confirmation, refuses active claims, archives queue display and ignores owned late reports', () => {
+  const { act, state, job } = running();
+  assert.throws(() => act('reset', { confirmed: true, queueRevision: 0 }), /active job/);
+  act('progress', { ...completion(job), status: 'blocked' });
+  assert.throws(() => act('reset', {}), /Confirm/);
+  act('resolve', { confirmed: true });
+  const next = act('submit', { ...recipe, submissionId: 'event_submission_0003' }, 'p2');
+  act('reset', { confirmed: true, queueRevision: 0 });
+  assert.equal(state.queueRevision, 1);
+  assert.equal(state.draining, false);
+  assert.deepEqual(state.jobs.map(item => item.status), ['cancelled', 'cancelled']);
+  assert(state.jobs.every(item => item.archivedAt === 100_000));
+  assert.deepEqual(publicState(state, 'p1', 100_000).jobs, []);
+  assert.equal(publicState(state, 'p1', 100_000).ownJob, null);
+  assert.equal(act('progress', { ...completion(job), status: 'completed' }).status, 'cancelled');
+  assert.throws(() => act('progress', { ...completion(job), workerId: 'b'.repeat(32) }));
+  assert.equal(state.jobs.find(item => item.id === next.id).status, 'cancelled');
+});
+test('older persisted state defaults queue revision and treats unmarked jobs as visible', () => {
+  const state = initialState('talk', 'hardware');
+  delete state.queueRevision;
+  state.jobs.push({ id: 'legacy', number: 1, participantId: 'p1', name: 'Alex', status: 'completed',
+    createdAt: 1, well: 'plate.A1', runId: 'old-run' });
+  assert.equal(publicState(state, 'p1', 100_000).queueRevision, 0);
+  assert.equal(publicState(state, 'p1', 100_000).ownJob.id, 'legacy');
+  transition(state, 'reset', { confirmed: true, queueRevision: 0 }, { now: 2, participantId: null, ipHash: 'venue' });
+  assert.equal(state.queueRevision, 1);
+  assert.equal(state.jobs[0].runId, 'old-run');
+  assert.deepEqual(publicState(state, 'p1', 100_000).jobs, []);
+});
+test('reset and worker claim races resolve through compare-and-set without claiming archived work', async () => {
+  let record = { revision: 1, state: initialState('talk', 'hardware') };
+  const seed = record.state;
+  seed.worker = { id: worker.workerId, mode: worker.mode, lastSeen: 100_000 };
+  seed.jobs.push({ id: 'queued', number: 1, participantId: 'p1', name: 'Alex', recipe: {}, status: 'ready',
+    createdAt: 1, well: null, runId: null });
+  seed.draining = true;
+  let initialReads = 0, releaseReads;
+  const readsReady = new Promise(resolve => { releaseReads = resolve; });
+  const fetcher = async (url, options) => {
+    if (options.method === 'GET') {
+      const snapshot = structuredClone(record);
+      if (initialReads < 2) { initialReads++; if (initialReads === 2) releaseReads(); await readsReady; }
+      return Response.json([snapshot]);
+    }
+    const input = JSON.parse(options.body);
+    if (input.expected_revision !== record.revision) return Response.json(false);
+    record = { revision: record.revision + 1, state: input.next_state };
+    return Response.json(true);
+  };
+  const env = { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SECRET_KEY: 'sb_secret_test', LIVE_EVENT_ID: 'talk', LIVE_EXECUTION_MODE: 'hardware' };
+  const stores = [new SupabaseStore(env, fetcher), new SupabaseStore(env, fetcher)];
+  const results = await Promise.allSettled([
+    stores[0].mutate(state => transition(state, 'claim', worker, { now: 100_000, participantId: null, ipHash: 'venue' })),
+    stores[1].mutate(state => transition(state, 'reset', { confirmed: true, queueRevision: 0 }, { now: 100_000, participantId: null, ipHash: 'venue' })),
+  ]);
+  const current = await stores[0].read();
+  if (current.activeId) {
+    assert(results.some(result => result.status === 'rejected'));
+  } else {
+    assert.equal(current.queueRevision, 1);
+    assert.equal(current.jobs[0].archivedAt, 100_000);
+  }
 });
 test('Supabase compare-and-set preserves concurrent submissions across independent instances', async () => {
   let record = null;

@@ -108,8 +108,51 @@ try {
   assert.equal(state.jobs[1].name, 'Zoë');
   await expect(screen.getByRole('heading', { name: 'Zoë', exact: true })).toBeVisible();
   assert(state.jobs[0].well);
+
+  // A second intentional recipe from the same phone must be a new job. Polling
+  // and reloads must not replace its editor with the previous receipt.
+  await page.getByRole('button', { name: 'Submit another mixture', exact: true }).click();
+  await expect(page.getByLabel('Your name')).toHaveValue('Alex');
+  await page.getByRole('slider', { name: 'Red', exact: true }).fill('2');
+  await page.reload();
+  await expect(page.getByRole('slider', { name: 'Red', exact: true })).toHaveValue('2');
+  await page.getByRole('button', { name: 'Submit', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Queued', exact: true })).toBeVisible();
+  const repeated = await (await participant.request.get(`${baseUrl}/api/live/state`)).json();
+  assert.equal(repeated.jobs.length, 3);
+  assert.notEqual(repeated.ownJob.id, state.jobs[0].id);
+  assert.equal(repeated.ownJob.recipe.parts.red, 2);
+  await page.screenshot({ path: path.join(screenshots, 'repeat-submission.png'), fullPage: true });
+
+  await expect(operator.getByRole('button', { name: 'Reset queue', exact: true })).toBeEnabled();
+  await operator.getByRole('button', { name: 'Reset queue', exact: true }).click();
+  await expect(operator.getByRole('button', { name: 'Confirm reset', exact: true })).toBeVisible();
+  await operator.screenshot({ path: path.join(screenshots, 'reset-confirmation.png'), fullPage: true });
+  await operator.getByRole('button', { name: 'Keep queue', exact: true }).click();
+  assert.equal((await (await participant.request.get(`${baseUrl}/api/live/state`)).json()).jobs.length, 3);
+  await operator.getByRole('button', { name: 'Reset queue', exact: true }).click();
+  await operator.getByRole('button', { name: 'Confirm reset', exact: true }).click();
+  await expect.poll(async () => (await (await participant.request.get(`${baseUrl}/api/live/state`)).json()).jobs.length).toBe(0);
+  const resetState = await (await participant.request.get(`${baseUrl}/api/live/state`)).json();
+  assert.equal(resetState.queueRevision, 1);
+  assert.equal(resetState.draining, false);
+  assert.equal(resetState.activeId, null);
+  await expect(page.getByRole('button', { name: 'Submit', exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(late.getByRole('button', { name: 'Submit', exact: true })).toBeVisible({ timeout: 10_000 });
+
+  await page.getByLabel('Your name').fill('Alex');
+  await page.getByRole('button', { name: 'Submit', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Queued', exact: true })).toBeVisible();
+  await expect(operator.getByRole('button', { name: 'Run 1 queued recipe' })).toBeEnabled();
+  await operator.getByRole('button', { name: 'Run 1 queued recipe' }).click();
+  await expect(page.getByRole('heading', { name: 'Complete', exact: true })).toBeVisible({ timeout: 40_000 });
+  const afterReset = await (await participant.request.get(`${baseUrl}/api/live/state`)).json();
+  assert.equal(afterReset.jobs.length, 1);
+  assert.equal(afterReset.jobs[0].status, 'completed');
+  assert.equal(afterReset.jobs[0].number, 4);
+  assert.notEqual(afterReset.jobs[0].well, state.jobs[0].well, 'Reset must preserve the worker well allocation journal.');
   assert.deepEqual(errors, []);
-  console.log('PASS: mobile picker, durable receipt, manual run, QR, simulated worker, one-well completion, and later-arrival hold.');
+  console.log('PASS: mobile picker, durable receipt, manual run, QR, simulated worker, later-arrival hold, repeat phone submissions, reset confirmation, receipt refresh, and fresh-well allocation after reset.');
   console.log(`Screenshots: ${screenshots}`);
 } finally {
   await browser?.close();

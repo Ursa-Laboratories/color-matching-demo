@@ -33,6 +33,24 @@ test('signed participant cookie survives refresh and deduplicates retry', async 
   assert.equal((await call('state', { headers: { cookie } })).body.ownJob.id, submitted.body.ownJob.id);
   assert.equal((await call('state', { headers: { cookie: cookie.replace(/.$/, 'x') } })).body.ownJob, null);
 });
+test('a participant can submit distinct IDs and public responses never expose submission IDs', async () => {
+  const call = fixture();
+  const firstState = await call('state');
+  const cookie = firstState.headers['Set-Cookie'].split(';')[0];
+  const headers = { cookie, 'content-type': 'application/json', origin: 'https://demo.test' };
+  const base = { red: 6, yellow: 3, blue: 1, name: 'Alex' };
+  const first = await call('jobs', { method: 'POST', headers, body: { ...base, submissionId: 'phone-submit-0001' } });
+  const retry = await call('jobs', { method: 'POST', headers, body: { ...base, submissionId: 'phone-submit-0001' } });
+  const second = await call('jobs', { method: 'POST', headers, body: { ...base, submissionId: 'phone-submit-0002' } });
+  assert.equal(first.body.jobs.length, 1);
+  assert.equal(retry.body.jobs.length, 1);
+  assert.equal(second.body.jobs.length, 2);
+  assert.notEqual(first.body.ownJob.id, second.body.ownJob.id);
+  assert.equal(second.body.ownJob.id, second.body.jobs[1].id);
+  assert.equal(second.body.jobs.some(job => Object.hasOwn(job, 'submissionId')), false);
+  assert.equal(Object.hasOwn(second.body.ownJob, 'submissionId'), false);
+  assert.equal((await call('jobs', { method: 'POST', headers, body: { ...base, submissionId: 'invalid id' } })).status, 400);
+});
 test('admin and worker permissions are separate; public cannot execute; mutations reject cross-origin and malformed bodies', async () => {
   const call = fixture();
   const json = { 'content-type': 'application/json' };
@@ -43,6 +61,44 @@ test('admin and worker permissions are separate; public cannot execute; mutation
   assert.equal((await call('jobs', { method: 'POST', headers: json, body: '{' })).status, 400);
   assert.equal((await call('jobs', { method: 'POST', headers: json, body: 'a'.repeat(5000) })).status, 413);
   assert.equal((await call('worker/claim', { headers: { authorization: `Bearer ${env.LIVE_WORKER_TOKEN}` } })).status, 404);
+  assert.equal((await call('admin/reset', { method: 'POST', headers: { ...json, authorization: `Bearer ${env.LIVE_WORKER_TOKEN}` }, body: { confirmed: true } })).status, 401);
+  assert.equal((await call('admin/reset', { method: 'POST', headers: json, body: { confirmed: true } })).status, 401);
+});
+test('authorized admin reset requires confirmation and hides archived jobs from both views', async () => {
+  const call = fixture();
+  const participant = await call('state');
+  const cookie = participant.headers['Set-Cookie'].split(';')[0];
+  const post = { method: 'POST', headers: { cookie, origin: 'https://demo.test', 'content-type': 'application/json' },
+    body: { red: 6, yellow: 3, blue: 1, name: 'Alex', submissionId: 'phone-submit-0001' } };
+  await call('jobs', post);
+  const adminHeaders = { authorization: `Bearer ${env.LIVE_ADMIN_TOKEN}`, 'content-type': 'application/json' };
+  assert.equal((await call('admin/reset', { method: 'POST', headers: adminHeaders, body: {} })).status, 409);
+  const reset = await call('admin/reset', { method: 'POST', headers: adminHeaders, body: { confirmed: true, queueRevision: 0 } });
+  assert.equal(reset.status, 200);
+  assert.equal(reset.body.queueRevision, 1);
+  assert.deepEqual(reset.body.jobs, []);
+  assert.equal((await call('state', { headers: { cookie } })).body.ownJob, null);
+});
+test('replayed reset after a lost response cannot archive jobs submitted under the new revision', async () => {
+  const call = fixture();
+  const participant = await call('state');
+  const cookie = participant.headers['Set-Cookie'].split(';')[0];
+  const participantHeaders = { cookie, origin: 'https://demo.test', 'content-type': 'application/json' };
+  const submit = submissionId => call('jobs', { method: 'POST', headers: participantHeaders,
+    body: { red: 6, yellow: 3, blue: 1, name: 'Alex', submissionId } });
+  await submit('phone-submit-0001');
+  const adminHeaders = { authorization: `Bearer ${env.LIVE_ADMIN_TOKEN}`, 'content-type': 'application/json' };
+  const replayedRequest = { method: 'POST', headers: adminHeaders, body: { confirmed: true, queueRevision: 0 } };
+  assert.equal((await call('admin/reset', replayedRequest)).status, 200);
+  const later = await submit('phone-submit-0002');
+  assert.equal(later.body.queueRevision, 1);
+  const replay = await call('admin/reset', replayedRequest);
+  assert.equal(replay.status, 409);
+  assert.match(replay.body.error, /queue changed/i);
+  const current = await call('state', { headers: { cookie } });
+  assert.equal(current.body.queueRevision, 1);
+  assert.equal(current.body.jobs.length, 1);
+  assert.equal(current.body.jobs[0].id, later.body.ownJob.id);
 });
 test('nested Vercel function entrypoints reach the shared admin and worker routes', async () => {
   let state = initialState('talk', 'simulation');

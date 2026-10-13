@@ -14,14 +14,49 @@ type Job = {
 };
 type State = {
   eventId: string; mode: 'hardware' | 'simulation'; accepting: boolean; draining: boolean;
-  activeId: string | null; workerOnline: boolean; jobs: Job[]; ownJob: Job | null;
+  activeId: string | null; workerOnline: boolean; jobs: Job[]; ownJob: Job | null; queueRevision?: number;
 };
+type Submission = { red: number; yellow: number; blue: number; name: string; submissionId: string };
+type PhoneState = { schemaVersion: 1; eventId: string; queueRevision: number; mode: 'mixer' | 'receipt'; parts: Parts; name: string; submission?: Submission };
+const PHONE_STATE_KEY = 'ursa-live-phone-v1';
 const COLORS: Record<Component, string> = { red: '#e96356', yellow: '#edc441', blue: '#5477dc' };
 const statusLabel: Record<Job['status'], string> = {
   queued: 'Queued', ready: 'Up next', running: 'Mixing',
   completed: 'Complete', blocked: 'On hold', cancelled: 'Removed',
 };
 const numberLabel = (job: Job) => '#' + String(job.number).padStart(3, '0');
+
+function readPhoneState(): PhoneState | null {
+  try {
+    const value = window.localStorage.getItem(PHONE_STATE_KEY);
+    if (!value) return null;
+    const parsed = JSON.parse(value) as Partial<PhoneState>;
+    const validParts = parsed?.parts && ['red', 'yellow', 'blue'].every(color => {
+      const part = parsed.parts?.[color as Component];
+      return Number.isInteger(part) && Number(part) >= 0 && Number(part) <= MAX_PARTS;
+    });
+    if (!parsed || parsed.schemaVersion !== 1 || typeof parsed.eventId !== 'string' || !validParts || typeof parsed.name !== 'string'
+      || !['mixer', 'receipt'].includes(parsed.mode ?? '')) return null;
+    const rawSubmission = parsed.submission as Partial<Submission> | undefined;
+    const validSubmission = rawSubmission && typeof rawSubmission.submissionId === 'string' && rawSubmission.submissionId.length >= 16
+      && typeof rawSubmission.name === 'string' && ['red', 'yellow', 'blue'].every(color => {
+        const part = rawSubmission[color as Component];
+        return Number.isInteger(part) && Number(part) >= 0 && Number(part) <= MAX_PARTS;
+      });
+    if (parsed.submission && !validSubmission) return { schemaVersion: 1, eventId: parsed.eventId,
+      queueRevision: Number(parsed.queueRevision) || 0, mode: 'mixer', parts: parsed.parts as Parts, name: parsed.name };
+    return { schemaVersion: 1, eventId: parsed.eventId, queueRevision: Number(parsed.queueRevision) || 0,
+      mode: parsed.mode as PhoneState['mode'], parts: parsed.parts as Parts, name: parsed.name,
+      submission: validSubmission ? rawSubmission as Submission : undefined };
+  } catch { return null; }
+}
+
+function newSubmissionId(): string {
+  try {
+    if (typeof window.crypto?.randomUUID === 'function') return window.crypto.randomUUID();
+  } catch { /* Use a local fallback when browser crypto is unavailable. */ }
+  return `mix-${Date.now().toString(36)}-${Math.random().toString(36).slice(2).padEnd(16, '0')}`;
+}
 
 function Arrow() {
   return <svg className="live-arrow" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M5 15 15 5M5 5h10v10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
@@ -55,7 +90,7 @@ function ColorPreview({ recipe, name, job }: { recipe: Recipe | null; name?: str
   </section>;
 }
 
-function Ticket({ job }: { job: Job }) {
+function Ticket({ job, onAnother }: { job: Job; onAnother?: () => void }) {
   return <section className="live-ticket" aria-label="Your submission">
     <span className="live-kicker">YOUR MIX · {numberLabel(job)}</span>
     <h1>{job.name ? <>{job.name}<span className="live-heading-dot">.</span></> : 'Your mix.'}</h1>
@@ -69,6 +104,7 @@ function Ticket({ job }: { job: Job }) {
       <dt><i style={{ backgroundColor: COLORS[color] }} />{color}</dt><dd>{job.recipe.volumes[color]} µL</dd>
     </div>)}</dl>
     {job.well && <p className="live-well">Well <strong>{job.well}</strong></p>}
+    {onAnother && <button className="live-primary live-another" type="button" onClick={onAnother}>Submit another mixture <Arrow /></button>}
   </section>;
 }
 
@@ -109,26 +145,62 @@ function Queue({ jobs, currentId, operator, pending, stale, onRemove }: {
 
 export default function LiveDemo({ view = 'live' }: { view?: string }) {
   const operator = view === 'operator', screen = view === 'screen';
+  const phoneView = !operator && !screen;
   const [tokenInput, setTokenInput] = useState('');
   const [token, setToken] = useState('');
-  const [parts, setParts] = useState<Parts>({ red: 6, yellow: 3, blue: 1 });
-  const [name, setName] = useState('');
+  const [phone, setPhone] = useState<PhoneState>(() => (phoneView ? readPhoneState() : null) ?? {
+    schemaVersion: 1, eventId: '', queueRevision: 0, mode: 'mixer', parts: { red: 6, yellow: 3, blue: 1 }, name: '',
+  });
+  const [resetRevision, setResetRevision] = useState<number | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const client = useQueryClient();
   const key = ['live-demo', operator ? 'operator' : 'public', token];
   const query = useQuery({ queryKey: key, queryFn: () => request<State>(operator ? 'admin/state' : 'state', token),
     enabled: !operator || !!token, refetchInterval: 3000, retry: false });
-  const mutation = useMutation({ mutationFn: ({ action, body }: { action: string; body: unknown }) => request<State>(action, token, body),
-    onSuccess: data => client.setQueryData(key, data) });
+  const mutation = useMutation({ mutationFn: async ({ action, body }: { action: string; body: unknown }) => ({
+    data: await request<State>(action, token, body), action,
+  }),
+    onSuccess: ({ data: result, action }) => {
+      client.setQueryData(key, result);
+      if (action === 'jobs' && !operator) setPhone(current => ({ ...current, mode: 'receipt' }));
+      if (action === 'admin/reset') setResetRevision(null);
+    } });
   useEffect(() => { document.title = 'Mix / CUB · Ursa'; }, []);
   const data = query.data, pending = mutation.isPending, stale = !!query.error;
+  const parts = phone.parts, name = phone.name;
+  useEffect(() => {
+    if (!data || !phoneView) return;
+    const revision = data.queueRevision ?? 0;
+    if (phone.eventId !== data.eventId || phone.queueRevision !== revision) {
+      setPhone(current => ({ ...current, schemaVersion: 1, eventId: data.eventId, queueRevision: revision,
+        mode: 'mixer', submission: undefined }));
+    }
+  }, [data?.eventId, data?.queueRevision, phoneView, phone.eventId, phone.queueRevision, data]);
+  useEffect(() => {
+    if (!phoneView) return;
+    try { window.localStorage.setItem(PHONE_STATE_KEY, JSON.stringify(phone)); } catch { /* Storage can be unavailable in private browsing. */ }
+  }, [phoneView, phone]);
   const current = data?.jobs.find(j => j.id === data.activeId);
   const queued = data?.jobs.filter(j => j.status === 'queued').length ?? 0;
   const recipe = COMPONENTS.some(color => parts[color] > 0) ? makeRecipe(parts) : null;
   const send = (action: string, body: unknown = {}) => mutation.mutate({ action, body });
+  const submit = (submission = phone.submission) => {
+    if (!submission) {
+      const payload: Submission = { ...phone.parts, name: phone.name.trim(), submissionId: newSubmissionId() };
+      setPhone(current => ({ ...current, submission: payload }));
+      mutation.mutate({ action: 'jobs', body: payload });
+      return;
+    }
+    mutation.mutate({ action: 'jobs', body: submission });
+  };
+  const startAnother = () => setPhone(current => ({ ...current, mode: 'mixer', submission: undefined }));
+  const queueRevision = data?.queueRevision ?? 0;
+  const resetDisabled = pending || stale || !!data?.activeId || !data?.jobs.length;
+  const resetIntentStale = resetRevision !== null && resetRevision !== queueRevision;
+  useEffect(() => { if (resetIntentStale) setResetRevision(null); }, [resetIntentStale]);
   const error = mutation.error ?? query.error;
   const canResolve = current?.status === 'blocked' || (current?.status === 'running' && !data?.workerOnline);
-  const featured = screen || operator ? current : data?.ownJob;
+  const featured = screen || operator ? current : phone.mode === 'receipt' ? data?.ownJob : undefined;
   const hasAccess = !operator || !!token;
 
   return <main className={`live-demo ${screen ? 'live-screen' : ''}`}><div className="live-shell">
@@ -151,29 +223,43 @@ export default function LiveDemo({ view = 'live' }: { view?: string }) {
         <button disabled={pending || stale || !data} onClick={() => send('admin/accepting', { accepting: !data?.accepting })}>{data?.accepting ? 'Close submissions' : 'Open submissions'}</button>
         <a href="/?view=screen" target="_blank" rel="noreferrer">Talk screen</a>
         <button onClick={() => { setToken(''); setTokenInput(''); client.removeQueries({ queryKey: ['live-demo', 'operator'] }); }}>Lock</button>
+        <button disabled={resetDisabled} onClick={() => setResetRevision(queueRevision)}>Reset queue</button>
       </div><p>Run starts the current queue. Later arrivals wait. To stop an active well, use CubOS.</p>
+        {!!data?.activeId && <p className="live-reset-hint">Reset is unavailable while a job is active. Retire the blocked job after checking the physical station.</p>}
+        {resetRevision !== null && !resetIntentStale && <div className="live-reset-confirm" role="alertdialog" aria-labelledby="live-reset-title" aria-describedby="live-reset-description">
+          <h2 id="live-reset-title">Reset the displayed queue?</h2>
+          <p id="live-reset-description">This clears displayed submissions and pauses the queue. Hardware and well usage stay unchanged.</p>
+          <div><button disabled={pending || stale || !!data?.activeId || !data?.jobs.length || resetIntentStale} onClick={() => send('admin/reset', { confirmed: true, queueRevision: resetRevision })}>Confirm reset</button>
+            <button disabled={pending} onClick={() => setResetRevision(null)}>Keep queue</button></div>
+        </div>}
         {canResolve && <div className="live-recovery"><p>{current?.message || 'Inspect the CubOS run before continuing.'}</p>
           <label><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} /> I stopped the laptop worker and CubOS run, and checked the physical station.</label>
           <button disabled={!confirmed || pending || stale} onClick={() => { send('admin/resolve', { confirmed: true }); setConfirmed(false); }}>Retire interrupted job</button>
         </div>}
       </section>}
       <div className={`live-workspace ${screen || operator ? 'live-host-workspace' : ''}`}>
-        {screen || operator ? <JoinCode /> : data?.ownJob ? <Ticket job={data.ownJob} /> :
-          <form className="live-mixer" onSubmit={e => { e.preventDefault(); if (recipe && name.trim()) send('jobs', { ...parts, name }); }}>
+        {screen || operator ? <JoinCode /> : phone.mode === 'receipt' ? data?.ownJob ? <Ticket job={data.ownJob} onAnother={startAnother} /> :
+          <section className="live-ticket" aria-label="Your submission" aria-live="polite">
+            <span className="live-kicker">YOUR MIX</span><p>{query.isLoading ? 'Loading your mix…' : 'Your mix is no longer in the visible queue.'}</p>
+            {!query.isLoading && <button className="live-primary live-another" type="button" onClick={startAnother}>Submit another mixture <Arrow /></button>}
+          </section> :
+          <form className="live-mixer" onSubmit={e => { e.preventDefault(); if (recipe && name.trim()) submit(); }}>
             <div className="live-mixer-title"><span className="live-kicker">CLOUD LAB / CUB</span><h1>Make a mix.</h1></div>
             <div className="live-sliders">{COMPONENTS.map(color => <label className="live-slider" key={color} style={{ '--dye': COLORS[color], '--fill': `${parts[color] / MAX_PARTS * 100}%` } as CSSProperties}>
               <span><span className="live-dye-label"><i />{color}</span><output>{parts[color]}<small> / {MAX_PARTS}</small></output></span>
-              <input aria-label={color[0].toUpperCase() + color.slice(1)} aria-valuetext={`${parts[color]} parts, ${recipe?.volumes[color] ?? 0} microliters`} type="range" min="0" max={MAX_PARTS} step="1" value={parts[color]}
-                onChange={e => setParts({ ...parts, [color]: Number(e.target.value) })} />
+              <input aria-label={color[0].toUpperCase() + color.slice(1)} aria-valuetext={`${parts[color]} parts, ${recipe?.volumes[color] ?? 0} microliters`} type="range" min="0" max={MAX_PARTS} step="1" value={parts[color]} disabled={!!phone.submission}
+                onChange={e => setPhone({ ...phone, parts: { ...parts, [color]: Number(e.target.value) } })} />
             </label>)}</div>
             <div className="live-name-field"><label htmlFor="mix-name">Your name</label>
-              <input id="mix-name" name="name" type="text" value={name} onChange={e => setName(e.target.value)} placeholder="First name or nickname" required maxLength={40} autoComplete="given-name" aria-describedby="mix-name-hint" />
+              <input id="mix-name" name="name" type="text" value={name} onChange={e => setPhone({ ...phone, name: e.target.value })} placeholder="First name or nickname" required maxLength={40} autoComplete="given-name" aria-describedby="mix-name-hint" disabled={!!phone.submission} />
               <span id="mix-name-hint">Shown with your mix.</span>
             </div>
+            {phone.submission && <p className="live-validation" role="status">Retry sends the same saved mix. Start a new mixture to change it.</p>}
             {!recipe && <p className="live-validation" role="status">Add a little color first.</p>}
-            <button className="live-primary" type="submit" disabled={!recipe || !name.trim() || !data || stale || pending || !data.accepting}>
-              {pending ? 'Submitting…' : data && !data.accepting ? 'Submissions closed' : 'Submit'}<Arrow />
+            <button className="live-primary" type="submit" disabled={!recipe || !name.trim() || !data || stale || pending || (!data.accepting && !phone.submission)}>
+              {pending ? 'Submitting…' : phone.submission ? 'Retry submission' : data && !data.accepting ? 'Submissions closed' : 'Submit'}<Arrow />
             </button>
+            {phone.submission && <button className="live-secondary" type="button" disabled={pending} onClick={startAnother}>Start a new mixture</button>}
           </form>}
         <div className="live-canvas">
           {screen || operator ? <div className="live-bench-status" role="status"><i className={current?.status ?? ''} />
