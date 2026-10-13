@@ -2,7 +2,9 @@
 
 Participants scan a QR code, set red/yellow/blue proportions, add a first name or
 nickname, and submit a recipe. Their name appears with the mix in the public queue.
-The circular color preview is illustrative; actual dyes may look different.
+The recipe display shows red/yellow/blue proportions and volumes. Completed
+mixtures show their well number and an operator-added photo; a generated color
+is never presented as the physical result.
 The host presses **Run**. CUB makes each queued recipe in one fresh well, then
 reports completion. Each recipe totals **150 µL**, rounded to **5 µL increments**.
 There is no camera measurement or optimization in this live flow.
@@ -105,6 +107,7 @@ For a fully local rehearsal, build the frontend and place the three secrets in
 an ignored `.env.live` file:
 
 ```sh
+npm ci
 npm --prefix frontend ci
 npm --prefix frontend run build
 node --env-file=.env.live tools/live-server.mjs
@@ -174,6 +177,31 @@ tips, transfer dye, and mix through existing CubOS protocols. Validate physicall
    same stable CubOS run ID and never dispense a recipe a second time.
 
 ## Controls and recovery
+
+### Share actual result photos
+
+Open the operator page on your phone or laptop. After jobs complete, choose
+**Add result photo**, select the completed wells shown in the image, then choose
+**Take photo** or **Choose photo**. Check the preview and click **Save result
+photo**. One plate photo can be attached to several completed mixtures; each
+participant still sees their own well number. Existing photos can be replaced.
+Use a white background and consistent lighting. These are photos of the result,
+not calibrated color measurements.
+
+Photos appear on participant receipts, queue cards, and the talk screen. Until
+you add a photo, completed mixtures show **Photo not added yet**. Uploading a
+photo never executes or changes a recipe, marks a job complete, or changes
+CubOS configuration or inventory.
+
+The browser prepares a compact JPEG from a JPEG, PNG, or WebP image. The server
+validates and normalizes it again, removes metadata, and stores it separately
+from the queue in a private `ursa-live-photos` Supabase Storage bucket. The first
+authorized upload creates that app-owned bucket with the existing backend key;
+no public bucket policy or browser database key is needed. Only image references
+travel in queue responses. Resetting the queue hides archived images from the
+public photo route while preserving the stored evidence.
+
+### Run, pause, and reset
 
 - Run releases the recipes currently waiting, in FIFO order. New submissions
   wait for the next Run. Pause lets the current well finish and holds later jobs.

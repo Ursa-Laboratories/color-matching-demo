@@ -3,6 +3,7 @@ import { readFile, mkdir, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createHandler } from '../live/http.js';
 import { initialState } from '../live/queue.js';
+import { LocalPhotoStore, PHOTO_MAX_JSON_BYTES } from '../live/photos.js';
 
 if (process.env.VERCEL) throw new Error('The file store is for a single local rehearsal process only.');
 const dataDir = path.resolve(process.env.LIVE_DATA_DIR ?? '.live-data');
@@ -28,18 +29,22 @@ const store = {
     return operation;
   },
 };
-const handler = createHandler({ storeFactory: () => store });
+const handler = createHandler({ storeFactory: () => store, photoStoreFactory: () => new LocalPhotoStore(dataDir) });
 const dist = path.resolve('frontend/dist');
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png' };
 const server = http.createServer(async (req, res) => {
   try {
     if (req.url.startsWith('/api/live/')) {
-      let body = '';
+      const upload = new URL(req.url, 'http://localhost').pathname === '/api/live/admin/photos';
+      const bodyLimit = upload ? PHOTO_MAX_JSON_BYTES : 4096;
+      const chunks = [];
+      let size = 0;
       for await (const chunk of req) {
-        body += chunk;
-        if (Buffer.byteLength(body) > 4096) { res.writeHead(413); res.end(); return; }
+        size += chunk.length;
+        if (size > bodyLimit) { res.writeHead(413, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Request too large.' })); return; }
+        chunks.push(Buffer.from(chunk));
       }
-      req.body = body || undefined;
+      req.body = size ? Buffer.concat(chunks) : undefined;
       return handler(req, res);
     }
     const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);

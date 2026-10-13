@@ -6,7 +6,8 @@ import LiveDemo from './LiveDemo';
 
 type DemoJob = {
   id: string; number: number; name: string; recipe: ReturnType<typeof makeRecipe>;
-  status: 'queued' | 'blocked'; well: string | null; runId: string | null;
+  status: 'queued' | 'blocked' | 'completed'; well: string | null; runId: string | null;
+  resultPhoto?: { id: string; url: string; width: number; height: number; uploadedAt: string; wellLabels: string[] } | null;
 };
 const makeJob = (id: string, number: number, submission: { red: number; yellow: number; blue: number; name: string }): DemoJob => ({
   id, number, name: submission.name, recipe: makeRecipe(submission), status: 'queued', well: null, runId: null,
@@ -103,6 +104,36 @@ describe('LiveDemo phone and operator queue flows', () => {
     renderDemo();
     expect(await screen.findByLabelText('Your name')).toHaveValue('Mina');
     expect(screen.getByLabelText('Yellow')).toHaveValue('8');
+  });
+
+  it('shows actual completed photos on participant receipts and the talk screen', async () => {
+    const job = { ...makeJob('job-1', 1, { red: 6, yellow: 3, blue: 1, name: 'Mina' }), status: 'completed' as const,
+      well: 'A1', resultPhoto: { id: 'photo-1', url: '/api/live/photos/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', width: 1200, height: 800, uploadedAt: '2026-10-13T12:00:00Z', wellLabels: ['A1'] } };
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => reply(state({ jobs: [job], ownJob: job })));
+    window.localStorage.setItem('ursa-live-phone-v1', JSON.stringify({ schemaVersion: 1, eventId: 'event-one', queueRevision: 0,
+      mode: 'receipt', parts: { red: 6, yellow: 3, blue: 1 }, name: 'Mina' }));
+    const phone = renderDemo();
+    const phoneImages = await screen.findAllByRole('img', { name: 'Result photo for well A1' });
+    expect(phoneImages[0]).toHaveAttribute('src', job.resultPhoto.url);
+    expect(await screen.findAllByRole('region', { name: 'Recipe proportions' })).toHaveLength(1);
+    expect(screen.queryByText('Made by CUB')).not.toBeInTheDocument();
+    expect(document.querySelector('.live-color-disc')).toBeNull();
+    phone.unmount();
+
+    renderDemo('screen');
+    const screenImages = await screen.findAllByRole('img', { name: 'Result photo for well A1' });
+    expect(screenImages[0]).toHaveAttribute('src', job.resultPhoto.url);
+    expect(screen.getByText(/Complete · Mina/)).toBeInTheDocument();
+  });
+
+  it('uses an honest placeholder for a completed recipe without an actual photo', async () => {
+    const job = { ...makeJob('job-1', 1, { red: 6, yellow: 3, blue: 1, name: 'Mina' }), status: 'completed' as const, well: 'A1' };
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => reply(state({ jobs: [job], ownJob: job })));
+    window.localStorage.setItem('ursa-live-phone-v1', JSON.stringify({ schemaVersion: 1, eventId: 'event-one', queueRevision: 0,
+      mode: 'receipt', parts: { red: 6, yellow: 3, blue: 1 }, name: 'Mina' }));
+    renderDemo();
+    expect(await screen.findByText('Photo not added yet')).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: /Result photo/ })).not.toBeInTheDocument();
   });
 
   it('requires reset confirmation and sends the captured queue revision', async () => {

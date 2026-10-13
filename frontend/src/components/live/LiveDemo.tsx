@@ -4,13 +4,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import QRCode from 'qrcode';
 import { COMPONENTS, makeRecipe, MAX_PARTS, TOTAL_VOLUME_UL } from '../../../../shared/recipe.js';
 import type { Component, Parts, Recipe } from '../../../../shared/recipe.js';
-import { previewPalette } from './palette';
+import PhotoUpload from './PhotoUpload';
+import type { PhotoJob } from './PhotoUpload';
 import './LiveDemo.css';
 
-type Job = {
-  id: string; number: number; name?: string; recipe: Recipe;
+type Job = PhotoJob & {
+  recipe: Recipe;
   status: 'queued' | 'ready' | 'running' | 'completed' | 'blocked' | 'cancelled';
-  well: string | null; runId: string | null; message?: string;
+  runId: string | null; message?: string;
 };
 type State = {
   eventId: string; mode: 'hardware' | 'simulation'; accepting: boolean; draining: boolean;
@@ -74,19 +75,31 @@ async function request<T>(path: string, token = '', body?: unknown): Promise<T> 
   return value;
 }
 
-function ColorPreview({ recipe, name, job }: { recipe: Recipe | null; name?: string; job?: Job }) {
-  const palette = previewPalette(recipe);
-  return <section className="live-preview" aria-label="Color preview" style={{ backgroundColor: palette.background }}>
-    <div className="live-preview-top"><span>{job ? numberLabel(job) : 'Your mix'}</span><span>{TOTAL_VOLUME_UL} µL</span></div>
-    <div className="live-color-disc" style={{ backgroundColor: palette.color }} aria-hidden="true" />
-    <div className="live-preview-bottom">
-      <div>{name?.trim() && <span className="live-preview-name">{name.trim()}</span>}
-        <div className="live-color-ratio" aria-label="Ingredient volumes">{COMPONENTS.map(color => <span key={color}>
-          <i style={{ backgroundColor: COLORS[color] }} />{recipe?.volumes[color] ?? 0}<small> µL</small>
-        </span>)}</div>
-      </div>
-      <span className="live-preview-note">Approximate color</span>
+function RecipeProportions({ recipe, title }: { recipe: Recipe; title?: string }) {
+  const totalParts = COMPONENTS.reduce((sum, color) => sum + recipe.parts[color], 0);
+  return <section className="live-recipe" aria-label="Recipe proportions">
+    {title && <h2>{title}</h2>}
+    <div className="live-recipe-bar" role="img" aria-label={COMPONENTS.map(color => `${color} ${recipe.parts[color]} parts`).join(', ')}>
+      {COMPONENTS.map(color => recipe.parts[color] > 0 && <span key={color} style={{ backgroundColor: COLORS[color], flexGrow: recipe.parts[color] / totalParts }} />)}
     </div>
+    <dl className="live-recipe-values">{COMPONENTS.map(color => <div key={color}>
+      <dt><i style={{ backgroundColor: COLORS[color] }} />{color}</dt>
+      <dd>{recipe.parts[color]} parts <span>·</span> {recipe.volumes[color]} µL</dd>
+    </div>)}</dl>
+    <p className="live-recipe-total">Total · {TOTAL_VOLUME_UL} µL</p>
+  </section>;
+}
+
+function JobVisual({ job }: { job: Job }) {
+  const isComplete = job.status === 'completed';
+  return <section className="live-job-visual" aria-label={`${job.well ? `Well ${job.well}` : numberLabel(job)} result`}>
+    <div className="live-job-visual-heading"><span className="live-kicker">{job.well ? `WELL ${job.well}` : 'YOUR RECIPE'}</span><span>{numberLabel(job)}</span></div>
+    {isComplete ? job.resultPhoto ? <a className="live-result-photo-link" href={job.resultPhoto.url} target="_blank" rel="noreferrer" aria-label={`Open result photo for well ${job.well}`}>
+      <img className="live-result-photo" src={job.resultPhoto.url} alt={`Result photo for well ${job.well}`} />
+      <span>{job.resultPhoto.wellLabels.length > 1 ? `Plate photo · your well ${job.well}` : 'Open photo'}</span>
+    </a> : <div className="live-photo-placeholder">Photo not added yet</div>
+      : <RecipeProportions recipe={job.recipe} title={job.name || 'Recipe proportions'} />}
+    {isComplete && <RecipeProportions recipe={job.recipe} title={job.name || 'Recipe proportions'} />}
   </section>;
 }
 
@@ -100,9 +113,6 @@ function Ticket({ job, onAnother }: { job: Job; onAnother?: () => void }) {
         : job.status === 'running' ? 'CUB is making your mix.'
           : job.status === 'completed' ? 'Your mix is ready.'
             : job.status === 'blocked' ? 'The host is checking the station.' : 'This mix was removed.'}</p>
-    <dl className="live-receipt">{COMPONENTS.map(color => <div key={color}>
-      <dt><i style={{ backgroundColor: COLORS[color] }} />{color}</dt><dd>{job.recipe.volumes[color]} µL</dd>
-    </div>)}</dl>
     {job.well && <p className="live-well">Well <strong>{job.well}</strong></p>}
     {onAnother && <button className="live-primary live-another" type="button" onClick={onAnother}>Submit another mixture <Arrow /></button>}
   </section>;
@@ -124,20 +134,29 @@ function JoinCode() {
   </section>;
 }
 
-function Queue({ jobs, currentId, operator, pending, stale, onRemove }: {
-  jobs: Job[]; currentId?: string | null; operator: boolean; pending: boolean; stale: boolean; onRemove: (id: string) => void;
+function Queue({ jobs, currentId, operator, pending, stale, onRemove, onPhoto }: {
+  jobs: Job[]; currentId?: string | null; operator: boolean; pending: boolean; stale: boolean;
+  onRemove: (id: string) => void; onPhoto: (id: string) => void;
 }) {
   return <section className="live-queue" id="queue" aria-label="Live queue">
     <div className="live-queue-heading"><h2>In the lab <span>{jobs.length}</span></h2><span>One mix. One well.</span></div>
     {jobs.length ? <div className="live-queue-grid" aria-label="Submitted recipes">{jobs.map(job => {
-      const palette = previewPalette(job.recipe);
       return <article className={`live-job ${job.id === currentId ? 'is-active' : ''}`} key={job.id}>
-        <div className="live-job-swatch" style={{ backgroundColor: palette.background }}>
-          <span>{numberLabel(job)}</span><i style={{ backgroundColor: palette.color }} />
+        <div className="live-job-swatch">
+          <span>{numberLabel(job)}</span>
+          {job.status === 'completed' && job.resultPhoto ? <a href={job.resultPhoto.url} target="_blank" rel="noreferrer" aria-label={`Open result photo for well ${job.well}`}>
+            <img src={job.resultPhoto.url} alt={`Result photo for well ${job.well}`} />
+          </a> : <div className="live-queue-recipe-bar" aria-label="Recipe proportions">
+            {COMPONENTS.map(color => job.recipe.parts[color] > 0 && <i key={color} style={{ backgroundColor: COLORS[color], flexGrow: job.recipe.parts[color] }} />)}
+          </div>}
           {operator && ['queued', 'ready'].includes(job.status) && <button disabled={pending || stale} aria-label={`Remove recipe ${job.number}`} onClick={() => onRemove(job.id)}>×</button>}
         </div>
         <div className="live-job-caption"><h3>{job.name || `Mix ${numberLabel(job)}`}</h3><span className={`live-job-status ${job.status}`}>{statusLabel[job.status]}</span></div>
         {job.well && <p className="live-job-well">{job.well}</p>}
+        <p className="live-queue-volumes">{COMPONENTS.map(color => `${color[0].toUpperCase()} ${job.recipe.volumes[color]} µL`).join(' · ')}</p>
+        {operator && job.status === 'completed' && job.well && <button className="live-job-photo-action" disabled={pending || stale} onClick={() => onPhoto(job.id)}>
+          {job.resultPhoto ? 'Replace photo' : 'Add photo'}
+        </button>}
       </article>;
     })}</div> : <p className="live-empty">Your mix could be the first.</p>}
   </section>;
@@ -151,6 +170,8 @@ export default function LiveDemo({ view = 'live' }: { view?: string }) {
   const [phone, setPhone] = useState<PhoneState>(() => (phoneView ? readPhoneState() : null) ?? {
     schemaVersion: 1, eventId: '', queueRevision: 0, mode: 'mixer', parts: { red: 6, yellow: 3, blue: 1 }, name: '',
   });
+  const [photoPanelOpen, setPhotoPanelOpen] = useState(false);
+  const [photoPresetJobId, setPhotoPresetJobId] = useState<string | null>(null);
   const [resetRevision, setResetRevision] = useState<number | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const client = useQueryClient();
@@ -195,12 +216,17 @@ export default function LiveDemo({ view = 'live' }: { view?: string }) {
   };
   const startAnother = () => setPhone(current => ({ ...current, mode: 'mixer', submission: undefined }));
   const queueRevision = data?.queueRevision ?? 0;
+  const completedPhotoJobs = data?.jobs.filter(job => job.status === 'completed' && job.well) ?? [];
+  const uploadPhoto = async (body: { jobIds: string[]; queueRevision: number; image: string }) => {
+    await mutation.mutateAsync({ action: 'admin/photos', body });
+  };
   const resetDisabled = pending || stale || !!data?.activeId || !data?.jobs.length;
   const resetIntentStale = resetRevision !== null && resetRevision !== queueRevision;
   useEffect(() => { if (resetIntentStale) setResetRevision(null); }, [resetIntentStale]);
   const error = mutation.error ?? query.error;
   const canResolve = current?.status === 'blocked' || (current?.status === 'running' && !data?.workerOnline);
-  const featured = screen || operator ? current : phone.mode === 'receipt' ? data?.ownJob : undefined;
+  const latestCompleted = [...(data?.jobs ?? [])].reverse().find(job => job.status === 'completed');
+  const featured = screen || operator ? current ?? latestCompleted : phone.mode === 'receipt' ? data?.ownJob : undefined;
   const hasAccess = !operator || !!token;
 
   return <main className={`live-demo ${screen ? 'live-screen' : ''}`}><div className="live-shell">
@@ -224,6 +250,7 @@ export default function LiveDemo({ view = 'live' }: { view?: string }) {
         <a href="/?view=screen" target="_blank" rel="noreferrer">Talk screen</a>
         <button onClick={() => { setToken(''); setTokenInput(''); client.removeQueries({ queryKey: ['live-demo', 'operator'] }); }}>Lock</button>
         <button disabled={resetDisabled} onClick={() => setResetRevision(queueRevision)}>Reset queue</button>
+        <button disabled={pending || stale || !completedPhotoJobs.length} onClick={() => { setPhotoPresetJobId(null); setPhotoPanelOpen(true); }}>Add result photo</button>
       </div><p>Run starts the current queue. Later arrivals wait. To stop an active well, use CubOS.</p>
         {!!data?.activeId && <p className="live-reset-hint">Reset is unavailable while a job is active. Retire the blocked job after checking the physical station.</p>}
         {resetRevision !== null && !resetIntentStale && <div className="live-reset-confirm" role="alertdialog" aria-labelledby="live-reset-title" aria-describedby="live-reset-description">
@@ -237,6 +264,8 @@ export default function LiveDemo({ view = 'live' }: { view?: string }) {
           <button disabled={!confirmed || pending || stale} onClick={() => { send('admin/resolve', { confirmed: true }); setConfirmed(false); }}>Retire interrupted job</button>
         </div>}
       </section>}
+      {operator && <PhotoUpload open={photoPanelOpen} presetJobId={photoPresetJobId} jobs={data?.jobs ?? []}
+        queueRevision={queueRevision} pending={pending} onClose={() => setPhotoPanelOpen(false)} onUpload={uploadPhoto} />}
       <div className={`live-workspace ${screen || operator ? 'live-host-workspace' : ''}`}>
         {screen || operator ? <JoinCode /> : phone.mode === 'receipt' ? data?.ownJob ? <Ticket job={data.ownJob} onAnother={startAnother} /> :
           <section className="live-ticket" aria-label="Your submission" aria-live="polite">
@@ -262,13 +291,14 @@ export default function LiveDemo({ view = 'live' }: { view?: string }) {
             {phone.submission && <button className="live-secondary" type="button" disabled={pending} onClick={startAnother}>Start a new mixture</button>}
           </form>}
         <div className="live-canvas">
-          {screen || operator ? <div className="live-bench-status" role="status"><i className={current?.status ?? ''} />
-            <h2>{current ? `${statusLabel[current.status]} · ${current.name || numberLabel(current)}` : data?.draining ? 'Next mix, coming up.' : 'Ready to mix.'}</h2>
+          {screen || operator ? <div className="live-bench-status" role="status"><i className={current?.status ?? latestCompleted?.status ?? ''} />
+            <h2>{current ? `${statusLabel[current.status]} · ${current.name || numberLabel(current)}` : latestCompleted ? `${statusLabel[latestCompleted.status]} · ${latestCompleted.name || numberLabel(latestCompleted)}` : data?.draining ? 'Next mix, coming up.' : 'Ready to mix.'}</h2>
           </div> : null}
-          <ColorPreview recipe={featured?.recipe ?? recipe} name={featured?.name ?? (screen || operator ? 'Made by CUB' : name)} job={featured ?? undefined} />
+          {featured ? <JobVisual job={featured} /> : recipe ? <RecipeProportions recipe={recipe} title="Your recipe" /> : <p className="live-empty-recipe">A mix will appear here.</p>}
         </div>
       </div>
-      <Queue jobs={data?.jobs ?? []} currentId={data?.activeId} operator={operator} pending={pending} stale={stale} onRemove={id => send('admin/cancel', { jobId: id })} />
+      <Queue jobs={data?.jobs ?? []} currentId={data?.activeId} operator={operator} pending={pending} stale={stale}
+        onRemove={id => send('admin/cancel', { jobId: id })} onPhoto={id => { setPhotoPresetJobId(id); setPhotoPanelOpen(true); }} />
     </>}
     <footer className="live-footer"><span>Ursa Laboratories</span>{!hasAccess && <span>Host access</span>}</footer>
   </div></main>;

@@ -126,7 +126,12 @@ export function transition(state, action, body, context) {
 }
 export function publicJob(job) {
   if (!job) return null;
-  const { participantId, workerId, message, submissionId, archivedAt, ...safe } = job;
+  const { participantId, workerId, message, submissionId, archivedAt, resultPhoto, ...safe } = job;
+  if (resultPhoto && /^[a-f0-9]{64}$/.test(resultPhoto.id ?? '')) {
+    safe.resultPhoto = { id: resultPhoto.id, width: resultPhoto.width, height: resultPhoto.height,
+      uploadedAt: resultPhoto.uploadedAt, wellLabels: Array.isArray(resultPhoto.wellLabels) ? [...resultPhoto.wellLabels] : [],
+      url: `/api/live/photos/${resultPhoto.id}` };
+  }
   return safe;
 }
 export function publicState(state, participantId, now, operator = false) {

@@ -12,11 +12,12 @@ For audience participation during a talk, see [Cloud lab mixture demo](docs/live
 
 ## Run locally
 
-Requires Python 3.11 or newer and Node.js 20.19 or newer.
+Requires Python 3.11 or newer and Node.js 22 or newer.
 
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[dev]'
+npm ci
 cd frontend
 npm ci
 npm run build

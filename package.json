@@ -7,5 +7,10 @@
     "test": "node --test tests/live-*.test.mjs",
     "dev:live": "node tools/live-server.mjs"
   },
-  "engines": { "node": ">=22" }
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "sharp": "^0.35.5"
+  }
 }
