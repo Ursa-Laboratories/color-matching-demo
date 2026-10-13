@@ -69,7 +69,8 @@ export function createHandler({ env = process.env, storeFactory = () => new Supa
       res.statusCode = 200; res.end(JSON.stringify(result));
     } catch (error) {
       res.statusCode = error instanceof QueueError ? error.status : 503;
-      res.end(JSON.stringify({ error: error instanceof QueueError ? error.message : 'The queue is temporarily unavailable. Please retry.' }));
+      res.end(JSON.stringify({ error: error instanceof QueueError ? error.message : 'The queue is temporarily unavailable. Please retry.',
+        ...(error instanceof QueueError && error.code ? { code: error.code } : {}) }));
     }
   };
 }

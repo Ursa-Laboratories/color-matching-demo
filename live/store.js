@@ -2,8 +2,8 @@ import { initialState, QueueError } from './queue.js';
 
 export class SupabaseStore {
   constructor(env = process.env, fetcher = fetch) {
-    this.url = env.SUPABASE_URL?.replace(/\/$/, '');
-    this.token = env.SUPABASE_SECRET_KEY || env.SUPABASE_SERVICE_ROLE_KEY;
+    this.url = env.SUPABASE_URL?.trim().replace(/\/$/, '');
+    this.token = (env.SUPABASE_SECRET_KEY || env.SUPABASE_SERVICE_ROLE_KEY)?.trim();
     this.eventId = env.LIVE_EVENT_ID;
     this.mode = env.LIVE_EXECUTION_MODE;
     this.fetcher = fetcher;
@@ -21,7 +21,16 @@ export class SupabaseStore {
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: AbortSignal.timeout(5000),
     });
-    if (!response.ok) throw new QueueError('Queue storage is temporarily unavailable.', 503);
+    if (!response.ok) {
+      const details = await response.json().catch(() => null);
+      let code = 'QUEUE_STORAGE_UNAVAILABLE';
+      if (['PGRST205', 'PGRST202', '42P01', '42883'].includes(details?.code)) code = 'QUEUE_SCHEMA_MISSING';
+      else if (details?.code === '42501' || response.status === 403) code = 'QUEUE_ACCESS_DENIED';
+      else if (response.status === 401) code = 'QUEUE_AUTH_FAILED';
+      // Never echo or log the upstream body: it can contain private details.
+      console.error('Queue storage request failed', { status: response.status, code });
+      throw new QueueError('Queue storage is temporarily unavailable.', 503, code);
+    }
     return response.json();
   }
   async record() {

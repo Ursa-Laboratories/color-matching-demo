@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { makeRecipe, TOTAL_VOLUME_UL, VOLUME_STEP_UL, MAX_PARTS } from '../shared/recipe.js';
 
 export class QueueError extends Error {
-  constructor(message, status = 409) { super(message); this.status = status; }
+  constructor(message, status = 409, code) { super(message); this.status = status; this.code = code; }
 }
 export function initialState(eventId, mode) {
   return { version: 2, eventId, mode, accepting: true, draining: false, activeId: null,

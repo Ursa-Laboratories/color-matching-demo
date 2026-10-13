@@ -58,6 +58,13 @@ After deploying, use:
 Make production publicly accessible without Vercel login protection. Download
 the QR from the final production URL and test it on a phone using cellular data.
 
+If `/api/live/state` reports a storage error, its safe `code` identifies the setup
+step to check: `QUEUE_AUTH_FAILED` means Supabase rejected the key;
+`QUEUE_ACCESS_DENIED` means database/API access was denied; `QUEUE_SCHEMA_MISSING`
+means the queue table or function was not found. Check that the key belongs to
+the configured project and that `supabase/live-demo.sql` ran successfully there.
+After changing Vercel environment variables, redeploy to apply them.
+
 ## Laptop setup and rehearsal
 
 Requires Python 3.11+, Linux/macOS (or a suitable Linux VM), and internet access.
