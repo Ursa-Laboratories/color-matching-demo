@@ -6,7 +6,7 @@ reports completion. Each recipe totals **150 µL**, rounded to **5 µL increment
 There is no camera measurement or optimization in this live flow.
 
 ```text
-Phone ──HTTPS──→ Vercel page + Redis queue
+Phone ──HTTPS──→ Vercel page + Supabase queue
                            ↑
                      HTTPS polling
                            ↓
@@ -22,13 +22,17 @@ needed. The laptop runs one worker process, with no separate Learning server.
 
 Import this repository into Vercel with the repository root as **Root Directory**.
 The tracked `vercel.json` builds the frontend and `/api/live/*` Node functions.
-Connect an **Upstash Redis** database from the project's Storage/Marketplace tab.
-Set these server-only variables:
+Create a **Free Supabase project** directly at https://supabase.com/dashboard;
+there is no need to buy a Vercel Marketplace database. In its SQL Editor, run
+`supabase/live-demo.sql` once to create the private queue table and atomic update
+function. This migration only creates resources named `ursa_live_*`.
+
+In Vercel's project settings, set these server-only variables:
 
 | Variable | Value |
 | --- | --- |
-| `UPSTASH_REDIS_REST_URL` | Redis REST endpoint |
-| `UPSTASH_REDIS_REST_TOKEN` | Redis write token |
+| `SUPABASE_URL` | Project URL, e.g. `https://PROJECT.supabase.co` |
+| `SUPABASE_SECRET_KEY` | Backend secret key from Supabase's API Keys settings |
 | `LIVE_ADMIN_TOKEN` | Independent random host key, at least 32 characters |
 | `LIVE_WORKER_TOKEN` | Independent random laptop key, at least 32 characters |
 | `LIVE_SESSION_SECRET` | Independent random signing secret, at least 32 characters |
@@ -37,6 +41,11 @@ Set these server-only variables:
 
 Use a password manager to generate the three secrets. Never use `VITE_` prefixes
 for secrets or include them in the QR link. Missing configuration fails closed.
+For an older Supabase project, `SUPABASE_SERVICE_ROLE_KEY` can hold its legacy
+`service_role` JWT instead. Do not use the public publishable/anon key. The table
+has RLS enabled with no browser policies; only the backend can read or change it.
+Check that a Free project is active before the talk, as inactive projects may
+pause. No Supabase login or account is required for audience members.
 Keep preview and production event IDs distinct. `VITE_LIVE_DEMO=1` is set by the
 Vercel build; ordinary local Learning builds retain the original operator app.
 
@@ -147,7 +156,7 @@ tips, transfer dye, and mix through existing CubOS protocols. Validate physicall
 - A signed browser session allows one recipe per event and deduplicates retries.
   Clearing cookies can create another participant. A 300-job cap and generous
   shared-venue-IP burst limit provide basic abuse protection, not strong identity.
-- The cloud queue is durable and uses Redis compare-and-set across Vercel
+- The cloud queue is durable and uses Postgres compare-and-set across Vercel
   instances. Stale worker heartbeats do not expire active claims.
 - The local journal reserves a fresh well and records the exact protocol bundle
   and stable run ID **before** one hardware POST. Lost responses are resolved

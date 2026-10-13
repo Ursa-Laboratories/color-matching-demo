@@ -11,7 +11,7 @@ export function initialState(eventId, mode) {
 const identifier = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{16,80}$/.test(value);
 const required = (condition, message) => { if (!condition) throw new QueueError(message); };
 
-// Mutations run on a private copy and commit using a Redis compare-and-set.
+// Mutations run on a private copy and commit using a Postgres compare-and-set.
 export function transition(state, action, body, context) {
   const { now, participantId, ipHash } = context;
   if (action === 'submit') {

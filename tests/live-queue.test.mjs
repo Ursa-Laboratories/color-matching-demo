@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { initialState, publicState, transition } from '../live/queue.js';
 import { makeRecipe } from '../shared/recipe.js';
-import { RedisStore } from '../live/store.js';
+import { SupabaseStore } from '../live/store.js';
 
 const recipe = { red: 6, yellow: 3, blue: 1 };
 const worker = { workerId: 'a'.repeat(32), mode: 'hardware' };
@@ -101,17 +101,32 @@ test('a delayed worker report after retirement is acknowledged without reviving 
   act('heartbeat', worker); act('run');
   assert.equal(act('claim', worker).id, next.id);
 });
-test('Redis compare-and-set preserves concurrent submissions across independent instances', async () => {
-  let raw = null;
-  class FakeRedis extends RedisStore {
-    async command(command) {
-      if (command[0] === 'GET') return raw;
-      if (command[4] !== (raw ?? '')) return 0;
-      raw = command[5]; return 1;
+test('Supabase compare-and-set preserves concurrent submissions across independent instances', async () => {
+  let record = null;
+  const env = { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SECRET_KEY: 'sb_secret_test', LIVE_EVENT_ID: 'talk', LIVE_EXECUTION_MODE: 'hardware' };
+  const fetcher = async (url, options) => {
+    assert.equal(options.headers.apikey, env.SUPABASE_SECRET_KEY);
+    assert.equal(options.headers.Authorization, undefined);
+    if (options.method === 'GET') {
+      assert.equal(new URL(url).searchParams.get('id'), 'eq.mixtures-v2:talk');
+      return Response.json(record ? [record] : []);
     }
-  }
-  const env = { UPSTASH_REDIS_REST_URL: 'https://redis.invalid', UPSTASH_REDIS_REST_TOKEN: 'test', LIVE_EVENT_ID: 'talk', LIVE_EXECUTION_MODE: 'hardware' };
-  const stores = Array.from({ length: 10 }, () => new FakeRedis(env));
+    assert.equal(new URL(url).pathname, '/rest/v1/rpc/ursa_live_compare_and_set');
+    const body = JSON.parse(options.body);
+    if (body.expected_revision !== (record?.revision ?? 0)) return Response.json(false);
+    record = { revision: (record?.revision ?? 0) + 1, state: body.next_state };
+    return Response.json(true);
+  };
+  const stores = Array.from({ length: 10 }, () => new SupabaseStore(env, fetcher));
   await Promise.all(stores.map((store, i) => store.mutate(state => transition(state, 'submit', recipe, { now: 1, participantId: `p${i}`, ipHash: 'venue' }))));
   const state = await stores[0].read(); assert.equal(state.jobs.length, 10); assert.equal(new Set(state.jobs.map(j => j.number)).size, 10);
+});
+test('legacy service-role keys use JWT authentication and storage errors fail closed', async () => {
+  const env = { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'legacy.jwt.test', LIVE_EVENT_ID: 'talk', LIVE_EXECUTION_MODE: 'hardware' };
+  const store = new SupabaseStore(env, async (_url, options) => {
+    assert.equal(options.headers.Authorization, `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`);
+    return Response.json({ error: 'database credential detail' }, { status: 401 });
+  });
+  await assert.rejects(store.read(), /Queue storage is temporarily unavailable/);
+  assert.throws(() => new SupabaseStore({}), /not configured/);
 });

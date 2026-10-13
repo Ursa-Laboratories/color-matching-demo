@@ -1,6 +1,6 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { QueueError, publicJob, publicState, transition } from './queue.js';
-import { RedisStore } from './store.js';
+import { SupabaseStore } from './store.js';
 
 function equal(a, b) {
   const left = Buffer.from(a ?? ''), right = Buffer.from(b ?? '');
@@ -25,7 +25,7 @@ function session(req, res, env) {
   return next;
 }
 
-export function createHandler({ env = process.env, storeFactory = () => new RedisStore(env), now = Date.now } = {}) {
+export function createHandler({ env = process.env, storeFactory = () => new SupabaseStore(env), now = Date.now } = {}) {
   return async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Content-Type', 'application/json');

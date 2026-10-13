@@ -1,43 +1,52 @@
 import { initialState, QueueError } from './queue.js';
 
-const CAS = `local current = redis.call('GET', KEYS[1]) or ''
-if current ~= ARGV[1] then return 0 end
-redis.call('SET', KEYS[1], ARGV[2])
-return 1`;
-
-export class RedisStore {
-  constructor(env = process.env) {
-    this.url = env.UPSTASH_REDIS_REST_URL;
-    this.token = env.UPSTASH_REDIS_REST_TOKEN;
+export class SupabaseStore {
+  constructor(env = process.env, fetcher = fetch) {
+    this.url = env.SUPABASE_URL?.replace(/\/$/, '');
+    this.token = env.SUPABASE_SECRET_KEY || env.SUPABASE_SERVICE_ROLE_KEY;
     this.eventId = env.LIVE_EVENT_ID;
     this.mode = env.LIVE_EXECUTION_MODE;
-    if (!this.url || !this.token || !/^[a-zA-Z0-9_-]{1,80}$/.test(this.eventId ?? '')
+    this.fetcher = fetcher;
+    if (!this.url?.startsWith('https://') || !this.token || !/^[a-zA-Z0-9_-]{1,80}$/.test(this.eventId ?? '')
       || !['hardware', 'simulation'].includes(this.mode))
       throw new QueueError('Live demo storage is not configured.', 503);
-    this.key = `ursa:live:mixtures:v2:${this.eventId}`;
+    this.key = `mixtures-v2:${this.eventId}`;
   }
-  async command(command) {
-    const response = await fetch(this.url, { method: 'POST',
-      headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(command), signal: AbortSignal.timeout(5000) });
+  async request(path, body) {
+    const response = await this.fetcher(`${this.url}/rest/v1/${path}`, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { apikey: this.token, 'Content-Type': 'application/json',
+        // New Supabase secret keys are not JWTs; the gateway handles apikey auth.
+        ...(!this.token.startsWith('sb_secret_') ? { Authorization: `Bearer ${this.token}` } : {}) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: AbortSignal.timeout(5000),
+    });
     if (!response.ok) throw new QueueError('Queue storage is temporarily unavailable.', 503);
-    const result = await response.json();
-    if (result.error) throw new QueueError('Queue storage rejected the request.', 503);
-    return result.result;
+    return response.json();
   }
-  decode(raw) {
-    const state = raw ? JSON.parse(raw) : initialState(this.eventId, this.mode);
-    if (state.version !== 2 || state.mode !== this.mode) throw new QueueError('Use a new event ID when changing execution mode.', 503);
+  async record() {
+    const query = new URLSearchParams({ id: `eq.${this.key}`, select: 'revision,state', limit: '1' });
+    const rows = await this.request(`ursa_live_events?${query}`);
+    if (!Array.isArray(rows)) throw new QueueError('Queue storage returned an invalid response.', 503);
+    return rows[0] ?? null;
+  }
+  decode(record) {
+    const state = record?.state ?? initialState(this.eventId, this.mode);
+    if (state.version !== 2 || state.eventId !== this.eventId || state.mode !== this.mode)
+      throw new QueueError('Use a new event ID when changing execution mode.', 503);
     return state;
   }
-  async read() { return this.decode(await this.command(['GET', this.key])); }
+  async read() { return this.decode(await this.record()); }
   async mutate(update) {
     for (let attempt = 0; attempt < 12; attempt++) {
-      const raw = await this.command(['GET', this.key]);
-      const state = this.decode(raw);
+      const record = await this.record();
+      const state = this.decode(record);
       const result = update(state);
-      if (await this.command(['EVAL', CAS, '1', this.key, raw ?? '', JSON.stringify(state)]))
-        return { state, result };
+      const committed = await this.request('rpc/ursa_live_compare_and_set', {
+        event_key: this.key, expected_revision: record?.revision ?? 0, next_state: state,
+      });
+      if (committed === true) return { state, result };
+      if (committed !== false) throw new QueueError('Queue storage returned an invalid response.', 503);
     }
     throw new QueueError('The queue is busy. Please retry.', 503);
   }
