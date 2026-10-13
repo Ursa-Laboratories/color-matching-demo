@@ -1,0 +1,30 @@
+# EXAMPLE ONLY: review all heights, stock locations, instrument selection, mix
+# parameters and tip/waste locations for the calibrated CUB before installing.
+# Worker changes volumes, fresh tips and destination; it preserves other settings.
+protocol:
+  - pick_up_tip: {position: tips.A1}
+  - transfer:
+      source: stocks.A1
+      destination: plate.A1
+      volume_ul: 50
+      source_height: -8
+  - drop_tip: {position: waste}
+  - pick_up_tip: {position: tips.A2}
+  - transfer:
+      source: stocks.A2
+      destination: plate.A1
+      volume_ul: 50
+      source_height: -8
+  - drop_tip: {position: waste}
+  - pick_up_tip: {position: tips.A3}
+  - transfer:
+      source: stocks.A3
+      destination: plate.A1
+      volume_ul: 50
+      source_height: -8
+  - mix:
+      position: plate.A1
+      volume_ul: 100
+      cycles: 3
+      height: -3
+  - drop_tip: {position: waste}

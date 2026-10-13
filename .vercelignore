@@ -1,0 +1,9 @@
+.env*
+**/.env*
+.live-worker/
+.live-data/
+.venv/
+.vercel/
+**/__pycache__/
+node_modules/
+frontend/node_modules/

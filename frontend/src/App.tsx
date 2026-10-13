@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import CampaignPanel from "./components/campaigns/CampaignPanel";
 import { campaignApi } from "./components/campaigns/api";
 import DemoPresentation from "./components/demo/DemoPresentation";
+import LiveDemo from "./components/live/LiveDemo";
 import OvernightQueuePanel from "./components/overnight/OvernightQueuePanel";
 import AppLayout from "./components/layout/AppLayout";
 import DeckVisualization from "./components/deck/DeckVisualization";
@@ -180,5 +181,8 @@ function LearningApp() {
 }
 
 export default function App() {
-  return new URLSearchParams(window.location.search).get("view") === "demo" ? <DemoPresentation /> : <LearningApp />;
+  const view = new URLSearchParams(window.location.search).get("view");
+  if (import.meta.env.VITE_LIVE_DEMO === '1' || ['live', 'operator', 'screen'].includes(view ?? ''))
+    return <LiveDemo view={view ?? 'live'} />;
+  return view === "demo" ? <DemoPresentation /> : <LearningApp />;
 }

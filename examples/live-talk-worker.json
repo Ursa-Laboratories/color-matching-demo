@@ -1,0 +1,7 @@
+{
+  "gantry_file": "REPLACE_WITH_REVIEWED_GANTRY.yaml",
+  "deck_file": "REPLACE_WITH_REVIEWED_DECK.yaml",
+  "source_protocol_file": "live-mixture-protocol.yaml",
+  "fluid_state_id": 1,
+  "candidate_wells": ["plate.A1", "plate.A2", "plate.A3", "plate.A4", "plate.A5", "plate.A6", "plate.A7", "plate.A8", "plate.A9", "plate.A10", "plate.A11", "plate.A12"]
+}

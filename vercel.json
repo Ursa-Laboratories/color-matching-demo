@@ -1,0 +1,22 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "installCommand": "npm ci && npm ci --prefix frontend",
+  "buildCommand": "VITE_LIVE_DEMO=1 npm --prefix frontend run build",
+  "outputDirectory": "frontend/dist",
+  "functions": {
+    "api/live/[...path].js": { "maxDuration": 15 },
+    "api/live/worker/[action].js": { "maxDuration": 15 },
+    "api/live/admin/[action].js": { "maxDuration": 15 },
+    "api/live/admin/photos.js": { "maxDuration": 30 },
+    "api/live/photos/[id].js": { "maxDuration": 15 }
+  },
+  "headers": [{
+    "source": "/(.*)",
+    "headers": [
+      { "key": "X-Content-Type-Options", "value": "nosniff" },
+      { "key": "Referrer-Policy", "value": "same-origin" },
+      { "key": "X-Frame-Options", "value": "DENY" }
+    ]
+  }]
+}
