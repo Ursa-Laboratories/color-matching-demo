@@ -1,6 +1,8 @@
 # Cloud lab mixture demo
 
-Participants scan a QR code, set red/yellow/blue proportions, and submit a recipe.
+Participants scan a QR code, set red/yellow/blue proportions, add a first name or
+nickname, and submit a recipe. Their name appears with the mix in the public queue.
+The circular color preview is illustrative; actual dyes may look different.
 The host presses **Run**. CUB makes each queued recipe in one fresh well, then
 reports completion. Each recipe totals **150 µL**, rounded to **5 µL increments**.
 There is no camera measurement or optimization in this live flow.

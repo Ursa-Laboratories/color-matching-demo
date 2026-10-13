@@ -4,7 +4,7 @@ import { initialState, publicState, transition } from '../live/queue.js';
 import { makeRecipe } from '../shared/recipe.js';
 import { SupabaseStore } from '../live/store.js';
 
-const recipe = { red: 6, yellow: 3, blue: 1 };
+const recipe = { red: 6, yellow: 3, blue: 1, name: 'Alex' };
 const worker = { workerId: 'a'.repeat(32), mode: 'hardware' };
 function fixture() {
   let now = 100_000;
@@ -33,7 +33,7 @@ test('all slider combinations produce exactly 150 uL in 5 uL increments', () => 
 });
 test('invalid/empty recipes and noninteger parts are rejected server-side', () => {
   const { act } = fixture();
-  for (const bad of [{ red: 0, yellow: 0, blue: 0 }, { ...recipe, red: 11 }, { ...recipe, red: '6' }, { ...recipe, red: NaN }, { ...recipe, blue: 1.5 }])
+  for (const bad of [{ ...recipe, red: 0, yellow: 0, blue: 0 }, { ...recipe, red: 11 }, { ...recipe, red: '6' }, { ...recipe, red: NaN }, { ...recipe, blue: 1.5 }])
     assert.throws(() => act('submit', bad));
 });
 test('retries return the same saved recipe even after submissions close', () => {
@@ -41,6 +41,19 @@ test('retries return the same saved recipe even after submissions close', () => 
   act('accepting', { accepting: false });
   assert.equal(act('submit', { red: 1, yellow: 1, blue: 1 }).id, job.id);
   assert.equal(state.jobs.length, 1); assert.throws(() => act('submit', recipe, 'p2'));
+});
+test('names are required, bounded, normalized and preserved through public receipts and worker claims', () => {
+  const { act, state } = fixture();
+  for (const name of [undefined, null, 12, {}, '', '   ', 'a'.repeat(41), 'bad\u0000name', 'bad\u202ename'])
+    assert.throws(() => act('submit', { ...recipe, name }), error => error.status === 400);
+  const job = act('submit', { ...recipe, name: '  Zoe\u0308   Chen  ' });
+  assert.equal(job.name, 'Zoë Chen');
+  assert.equal(publicState(state, 'p1', 100_000).ownJob.name, 'Zoë Chen');
+  assert.equal(publicState(state, 'p2', 100_000).jobs[0].name, 'Zoë Chen');
+  assert.equal(act('submit', { ...recipe, name: 'Changed' }).name, 'Zoë Chen');
+  act('heartbeat', worker); act('run');
+  assert.equal(act('claim', worker).name, 'Zoë Chen');
+  assert.equal(state.jobs.length, 1);
 });
 test('Run snapshots only waiting jobs; new arrivals wait for the next Run', () => {
   const { act, state } = fixture(), first = act('submit', recipe);

@@ -19,13 +19,16 @@ export function transition(state, action, body, context) {
     if (existing) return existing;
     required(state.accepting, 'Submissions are closed for this session.');
     required(state.jobs.length < 300, 'The session queue is full.');
+    const name = typeof body.name === 'string' ? body.name.normalize('NFC').trim().replace(/\s+/gu, ' ') : '';
+    if (!name || name.length > 40 || /\p{Cc}|\p{Cf}/u.test(name))
+      throw new QueueError('Enter a name or nickname of 1–40 characters.', 400);
     let recipe;
     try { recipe = makeRecipe(body); } catch (error) { throw new QueueError(error.message, 400); }
     state.rates = Object.fromEntries(Object.entries(state.rates).filter(([, r]) => r.until > now));
     const rate = state.rates[ipHash] ?? { count: 0, until: now + 60_000 };
     if (rate.count >= 120) throw new QueueError('A lot of recipes arrived at once. Try again in a minute.', 429);
     rate.count++; state.rates[ipHash] = rate;
-    const job = { id: randomUUID(), number: state.jobs.length + 1, participantId, recipe,
+    const job = { id: randomUUID(), number: state.jobs.length + 1, participantId, name, recipe,
       status: 'queued', createdAt: now, well: null, runId: null };
     state.jobs.push(job); return job;
   }

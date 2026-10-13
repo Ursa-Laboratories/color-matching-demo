@@ -23,9 +23,10 @@ test('signed participant cookie survives refresh and deduplicates retry', async 
   const first = await call('state');
   const cookie = first.headers['Set-Cookie'].split(';')[0];
   const headers = { cookie, 'content-type': 'application/json', origin: 'https://demo.test' };
-  const body = { red: 6, yellow: 3, blue: 1 };
+  const body = { red: 6, yellow: 3, blue: 1, name: 'Alex' };
   const submitted = await call('jobs', { method: 'POST', headers, body });
   assert.equal(submitted.status, 200);
+  assert.equal(submitted.body.ownJob.name, 'Alex');
   assert.equal((await call('jobs', { method: 'POST', headers, body })).body.jobs.length, 1);
   assert.equal((await call('state', { headers: { cookie } })).body.ownJob.id, submitted.body.ownJob.id);
   assert.equal((await call('state', { headers: { cookie: cookie.replace(/.$/, 'x') } })).body.ownJob, null);
