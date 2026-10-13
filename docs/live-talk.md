@@ -193,3 +193,14 @@ MockTransport against the real CubOS HTTP adapter. They cover exact volumes,
 zero-component recipes, inventory rejection, restart recovery, and no duplicate
 hardware submissions. Lighting calibration is not required for execution; use
 simple consistent illumination if projecting a camera feed of the wells.
+
+To run the browser rehearsal against the hosted site, use a fresh event in
+`simulation` mode and load its host/worker keys from an ignored `.env.live`:
+
+```sh
+LIVE_TEST_URL=https://YOUR-PROJECT.vercel.app node --env-file=.env.live tools/live-smoke.mjs
+```
+
+This creates two test recipes and executes one in simulation. It refuses hardware
+events and nonempty queues. If the execution environment uses a network allowlist,
+allow the deployed hostname first; the test preserves its configured proxy.

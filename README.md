@@ -8,6 +8,8 @@ The three workspaces are **Active Learning**, **Color Matching**, and **Overnigh
 
 For audience participation during a talk, see [Cloud lab mixture demo](docs/live-talk.md): a Vercel-hosted QR page where participants choose red/yellow/blue proportions, a durable queue with manual Run controls, and a single laptop worker that makes each 150 µL recipe in one fresh well through CubOS over Wi-Fi. A hardware-free rehearsal mode is included.
 
+[Hosted mixture demo](https://ursa-cloud-lab.vercel.app/) · [Talk screen and QR](https://ursa-cloud-lab.vercel.app/?view=screen)
+
 ## Run locally
 
 Requires Python 3.11 or newer and Node.js 20.19 or newer.
