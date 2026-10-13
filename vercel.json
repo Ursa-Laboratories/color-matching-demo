@@ -4,7 +4,11 @@
   "installCommand": "npm ci --prefix frontend",
   "buildCommand": "VITE_LIVE_DEMO=1 npm --prefix frontend run build",
   "outputDirectory": "frontend/dist",
-  "functions": { "api/live/[...path].js": { "maxDuration": 15 } },
+  "functions": {
+    "api/live/[...path].js": { "maxDuration": 15 },
+    "api/live/worker/[action].js": { "maxDuration": 15 },
+    "api/live/admin/[action].js": { "maxDuration": 15 }
+  },
   "headers": [{
     "source": "/(.*)",
     "headers": [

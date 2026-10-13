@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { createHandler } from '../live/http.js';
 import { initialState } from '../live/queue.js';
 import { SupabaseStore } from '../live/store.js';
+import workerEntrypoint, { createHandler as createWorkerHandler } from '../api/live/worker/[action].js';
+import adminEntrypoint, { createHandler as createAdminHandler } from '../api/live/admin/[action].js';
 
 const env = { LIVE_ADMIN_TOKEN: 'admin'.repeat(8), LIVE_WORKER_TOKEN: 'worker'.repeat(8), LIVE_SESSION_SECRET: 'session'.repeat(8) };
 function fixture() {
@@ -41,6 +43,34 @@ test('admin and worker permissions are separate; public cannot execute; mutation
   assert.equal((await call('jobs', { method: 'POST', headers: json, body: '{' })).status, 400);
   assert.equal((await call('jobs', { method: 'POST', headers: json, body: 'a'.repeat(5000) })).status, 413);
   assert.equal((await call('worker/claim', { headers: { authorization: `Bearer ${env.LIVE_WORKER_TOKEN}` } })).status, 404);
+});
+test('nested Vercel function entrypoints reach the shared admin and worker routes', async () => {
+  let state = initialState('talk', 'simulation');
+  const store = { read: async () => state, mutate: async fn => {
+    const next = structuredClone(state), result = fn(next); state = next; return { state, result };
+  } };
+  const makeCall = handler => async (path, { method = 'GET', headers = {}, body } = {}) => {
+    const responseHeaders = {};
+    const res = { setHeader: (key, value) => { responseHeaders[key] = value; },
+      end(value) { this.body = JSON.parse(value); } };
+    await handler({ url: path, method, headers: { host: 'demo.test', ...headers }, body }, res);
+    return { status: res.statusCode, body: res.body, headers: responseHeaders };
+  };
+  assert.equal(typeof workerEntrypoint, 'function');
+  assert.equal(typeof adminEntrypoint, 'function');
+  const adminCall = makeCall(createAdminHandler({ env, storeFactory: () => store }));
+  const workerCall = makeCall(createWorkerHandler({ env, storeFactory: () => store }));
+  const admin = await adminCall('/api/live/admin/state', {
+    headers: { authorization: `Bearer ${env.LIVE_ADMIN_TOKEN}` },
+  });
+  assert.equal(admin.status, 200);
+  assert.equal(admin.body.eventId, 'talk');
+  const heartbeat = await workerCall('/api/live/worker/heartbeat', { method: 'POST',
+    headers: { authorization: `Bearer ${env.LIVE_WORKER_TOKEN}`, 'content-type': 'application/json' },
+    body: { workerId: 'worker_1234567890123456', mode: 'simulation' },
+  });
+  assert.equal(heartbeat.status, 200);
+  assert.equal(heartbeat.body.eventId, 'talk');
 });
 test('storage failures return actionable codes without exposing upstream details or credentials', async t => {
   const logs = [];
