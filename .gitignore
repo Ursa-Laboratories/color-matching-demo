@@ -11,3 +11,9 @@ frontend/test-results/
 frontend/playwright-report/
 .DS_Store
 .env
+.env.local
+.env.live
+.vercel/
+.live-worker/
+.live-data/
+node_modules/

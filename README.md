@@ -6,6 +6,8 @@ Active learning for lab experiments, with dedicated color matching and overnight
 
 The three workspaces are **Active Learning**, **Color Matching**, and **Overnight Runs**. The interface keeps CubOS's familiar operator layout with its own identity. Open the linked CubOS operator interface for calibration and station administration.
 
+For audience participation during a talk, see [Cloud lab mixture demo](docs/live-talk.md): a Vercel-hosted QR page where participants choose red/yellow/blue proportions, a durable queue with manual Run controls, and a single laptop worker that makes each 150 µL recipe in one fresh well through CubOS over Wi-Fi. A hardware-free rehearsal mode is included.
+
 ## Run locally
 
 Requires Python 3.11 or newer and Node.js 20.19 or newer.

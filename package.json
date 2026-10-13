@@ -1,0 +1,11 @@
+{
+  "name": "ursa-live-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm --prefix frontend run build",
+    "test": "node --test tests/live-*.test.mjs",
+    "dev:live": "node tools/live-server.mjs"
+  },
+  "engines": { "node": ">=22" }
+}
